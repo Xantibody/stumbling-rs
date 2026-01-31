@@ -41,8 +41,11 @@ fn default_limit() -> usize {
 pub struct WriteNoteParams {
     /// Relative path to the note from STUMBLING_ROOT (e.g., "daily/2024-01-01.md")
     path: String,
-    /// Content to write to the note
+    /// Body content to write to the note
     content: String,
+    /// Optional YAML frontmatter metadata (e.g., {"title": "My Note", "tags": ["rust"]})
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -119,6 +122,7 @@ impl StumblingServer {
 
     /// Create or overwrite a markdown note.
     /// Creates parent directories if they don't exist.
+    /// If metadata is provided, formats as YAML frontmatter.
     #[tool(name = "write_note")]
     async fn write_note(
         &self,
@@ -129,7 +133,13 @@ impl StumblingServer {
         let path = self.root.join(&params.path);
         let is_overwrite = path.exists();
 
-        match notes::write_note(&path, &params.content) {
+        // Format content with frontmatter if metadata is provided
+        let content = match params.metadata {
+            Some(meta) => notes::format_with_frontmatter(&meta, &params.content),
+            None => params.content.clone(),
+        };
+
+        match notes::write_note(&path, &content) {
             Ok(()) => {
                 let action = if is_overwrite { "Overwrote" } else { "Created" };
                 let msg = format!("{} {}", action, params.path);

@@ -94,6 +94,14 @@ pub fn search_notes(root: &Path, query: &str, limit: usize) -> Result<Vec<Search
     Ok(results.into_inner().unwrap())
 }
 
+/// Format content with YAML frontmatter.
+pub fn format_with_frontmatter(metadata: &serde_json::Value, body: &str) -> String {
+    let yaml = serde_yaml_ng::to_string(metadata).unwrap_or_default();
+    // serde_yaml_ng adds a trailing newline, so we trim it
+    let yaml = yaml.trim_end();
+    format!("---\n{}\n---\n\n{}", yaml, body)
+}
+
 /// Write content to a note file.
 /// Creates parent directories if they don't exist.
 /// Uses atomic write (write to temp, then rename) to prevent data corruption.
@@ -451,5 +459,56 @@ This is a test note about Gagagigo."#;
 
         assert!(!note_path.exists());
         assert!(result.contains("Moved to trash"));
+    }
+
+    // --- format_with_frontmatter ---
+
+    #[test]
+    fn test_format_with_frontmatter() {
+        let metadata = serde_json::json!({
+            "title": "Test Note",
+            "tags": ["rust", "mcp"]
+        });
+        let body = "# Hello\n\nThis is content.";
+
+        let result = format_with_frontmatter(&metadata, body);
+
+        assert!(result.starts_with("---\n"));
+        assert!(result.contains("title: Test Note"));
+        assert!(result.contains("tags:"));
+        assert!(result.contains("---\n\n# Hello"));
+    }
+
+    #[test]
+    fn test_format_with_frontmatter_empty_metadata() {
+        let metadata = serde_json::json!({});
+        let body = "Just body content";
+
+        let result = format_with_frontmatter(&metadata, body);
+
+        assert!(result.starts_with("---\n"));
+        assert!(result.contains("---\n\nJust body content"));
+    }
+
+    #[test]
+    fn test_write_note_with_frontmatter_roundtrip() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("roundtrip.md");
+
+        let metadata = serde_json::json!({"title": "Roundtrip Test"});
+        let body = "Body content here";
+        let content = format_with_frontmatter(&metadata, body);
+
+        write_note(&path, &content).unwrap();
+
+        // Read back and parse
+        let result = read_note(&path, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        assert_eq!(parsed["metadata"]["title"], "Roundtrip Test");
+        assert!(parsed["body"]
+            .as_str()
+            .unwrap()
+            .contains("Body content here"));
     }
 }
