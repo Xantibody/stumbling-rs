@@ -109,7 +109,9 @@ pub fn search_notes(root: &Path, query: &str, limit: usize) -> Result<Vec<Search
 
             for (line_num, line) in content.lines().enumerate() {
                 if grep::matcher::Matcher::is_match(&regex, line.as_bytes()).unwrap_or(false) {
-                    let mut results = results.lock().unwrap();
+                    let mut results = results
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     if results.len() < limit {
                         results.push(SearchResult {
                             path: relative_path.clone(),
@@ -122,7 +124,9 @@ pub fn search_notes(root: &Path, query: &str, limit: usize) -> Result<Vec<Search
         }
     });
 
-    Ok(results.into_inner().unwrap())
+    Ok(results
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()))
 }
 
 /// Get a nested field value from JSON using dot notation (e.g., "author.name").
@@ -187,7 +191,9 @@ pub fn search_metadata(
                                 .to_string_lossy()
                                 .to_string();
 
-                            let mut results = results.lock().unwrap();
+                            let mut results = results
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
                             if results.len() < limit {
                                 results.push(MetadataSearchResult {
                                     path: relative_path,
@@ -201,7 +207,9 @@ pub fn search_metadata(
         }
     });
 
-    Ok(results.into_inner().unwrap())
+    Ok(results
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()))
 }
 
 /// Format content with YAML frontmatter.

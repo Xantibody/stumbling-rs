@@ -119,11 +119,13 @@ impl StumblingServer {
         let Parameters(params) = params;
 
         match notes::search_notes(&self.root, &params.query, params.limit) {
-            Ok(results) => {
-                let output =
-                    serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".to_string());
-                Ok(CallToolResult::success(vec![Content::text(output)]))
-            }
+            Ok(results) => match serde_json::to_string_pretty(&results) {
+                Ok(output) => Ok(CallToolResult::success(vec![Content::text(output)])),
+                Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to serialize search results: {}",
+                    e
+                ))])),
+            },
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Search failed: {}",
                 e
@@ -141,11 +143,13 @@ impl StumblingServer {
         let Parameters(params) = params;
 
         match notes::search_metadata(&self.root, &params.field, &params.pattern, params.limit) {
-            Ok(results) => {
-                let output =
-                    serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".to_string());
-                Ok(CallToolResult::success(vec![Content::text(output)]))
-            }
+            Ok(results) => match serde_json::to_string_pretty(&results) {
+                Ok(output) => Ok(CallToolResult::success(vec![Content::text(output)])),
+                Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to serialize metadata search results: {}",
+                    e
+                ))])),
+            },
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Metadata search failed: {}",
                 e
