@@ -274,4 +274,182 @@ This is a test note about Gagagigo."#;
         assert!(!note_path.exists());
         assert!(result.contains("Permanently deleted"));
     }
+
+    // ========================================
+    // Boundary & Error Tests (0-1-N)
+    // ========================================
+
+    // --- read_note boundaries ---
+
+    #[test]
+    fn test_read_note_empty_file() {
+        let vault = setup_test_vault();
+        let empty_path = vault.path().join("empty.md");
+        fs::write(&empty_path, "").unwrap();
+
+        let result = read_note(&empty_path, false).unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_read_note_not_found() {
+        let vault = setup_test_vault();
+        let result = read_note(&vault.path().join("nonexistent.md"), false);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_note_frontmatter_only() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("frontmatter_only.md");
+        fs::write(&path, "---\ntitle: Only FM\n---\n").unwrap();
+
+        let result = read_note(&path, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        assert_eq!(parsed["metadata"]["title"], "Only FM");
+        assert_eq!(parsed["body"], "");
+    }
+
+    #[test]
+    fn test_read_note_invalid_yaml() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("invalid_yaml.md");
+        fs::write(&path, "---\n: invalid yaml [[\n---\n\nBody here").unwrap();
+
+        // Should return raw content when YAML is invalid
+        let result = read_note(&path, true).unwrap();
+        assert!(result.contains(": invalid yaml"));
+    }
+
+    #[test]
+    fn test_read_note_unclosed_frontmatter() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("unclosed.md");
+        fs::write(&path, "---\ntitle: Unclosed\n\nNo closing delimiter").unwrap();
+
+        // Should return raw content when frontmatter is unclosed
+        let result = read_note(&path, true).unwrap();
+        assert!(result.contains("No closing delimiter"));
+    }
+
+    #[test]
+    fn test_read_note_no_frontmatter_with_parse_flag() {
+        let vault = setup_test_vault();
+        let result = read_note(&vault.path().join("simple.md"), true).unwrap();
+
+        // Should return raw content when no frontmatter exists
+        assert!(result.contains("# Simple Note"));
+    }
+
+    // --- search_notes boundaries ---
+
+    #[test]
+    fn test_search_notes_empty_vault() {
+        let dir = TempDir::new().unwrap();
+        let results = search_notes(dir.path(), "anything", 10).unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_notes_no_matches() {
+        let vault = setup_test_vault();
+        let results = search_notes(vault.path(), "zzz_no_match_zzz", 10).unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_notes_invalid_regex() {
+        let vault = setup_test_vault();
+        let result = search_notes(vault.path(), "[invalid(regex", 10);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_search_notes_limit_zero() {
+        let vault = setup_test_vault();
+        let results = search_notes(vault.path(), "Gagagigo", 0).unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_notes_skips_hidden_dirs() {
+        let vault = setup_test_vault();
+
+        // Create a hidden directory with a note
+        fs::create_dir_all(vault.path().join(".obsidian")).unwrap();
+        fs::write(
+            vault.path().join(".obsidian/config.md"),
+            "# Hidden Gagagigo",
+        )
+        .unwrap();
+
+        let results = search_notes(vault.path(), "Hidden Gagagigo", 10).unwrap();
+
+        // Should not find the hidden file
+        assert!(results.is_empty());
+    }
+
+    // --- write_note boundaries ---
+
+    #[test]
+    fn test_write_note_empty_content() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("empty_write.md");
+
+        write_note(&path, "").unwrap();
+
+        assert!(path.exists());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn test_write_note_overwrite_existing() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("simple.md");
+
+        write_note(&path, "# Overwritten Content").unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Overwritten"));
+        assert!(!content.contains("No frontmatter"));
+    }
+
+    #[test]
+    fn test_write_note_unicode_content() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("unicode.md");
+
+        let content = "# ガガギゴ 🐉\n\n日本語テスト";
+        write_note(&path, content).unwrap();
+
+        let read_back = fs::read_to_string(&path).unwrap();
+        assert_eq!(read_back, content);
+    }
+
+    // --- delete_note boundaries ---
+
+    #[test]
+    fn test_delete_note_not_found() {
+        let vault = setup_test_vault();
+        let result = delete_note(vault.path(), &vault.path().join("nonexistent.md"), false);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete_note_in_subdirectory() {
+        let vault = setup_test_vault();
+        let note_path = vault.path().join("daily/2024-01-01.md");
+
+        let result = delete_note(vault.path(), &note_path, false).unwrap();
+
+        assert!(!note_path.exists());
+        assert!(result.contains("Moved to trash"));
+    }
 }

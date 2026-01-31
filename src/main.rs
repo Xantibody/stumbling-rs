@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use rmcp::{
     handler::server::{tool::ToolRouter, wrapper::Parameters},
     model::*,
-    tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler, ServiceExt,
+    service::Peer,
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
 };
 use serde::{Deserialize, Serialize};
 use std::{env, path::PathBuf};
@@ -122,15 +123,27 @@ impl StumblingServer {
     async fn write_note(
         &self,
         params: Parameters<WriteNoteParams>,
+        peer: Peer<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let Parameters(params) = params;
         let path = self.root.join(&params.path);
+        let is_overwrite = path.exists();
 
         match notes::write_note(&path, &params.content) {
-            Ok(()) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Successfully wrote to {}",
-                params.path
-            ))])),
+            Ok(()) => {
+                let action = if is_overwrite { "Overwrote" } else { "Created" };
+                let msg = format!("{} {}", action, params.path);
+
+                let _ = peer
+                    .notify_logging_message(LoggingMessageNotificationParam {
+                        level: LoggingLevel::Info,
+                        logger: Some("stumbling-rs".into()),
+                        data: msg.clone().into(),
+                    })
+                    .await;
+
+                Ok(CallToolResult::success(vec![Content::text(msg)]))
+            }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Failed to write note: {}",
                 e
@@ -144,12 +157,23 @@ impl StumblingServer {
     async fn delete_note(
         &self,
         params: Parameters<DeleteNoteParams>,
+        peer: Peer<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let Parameters(params) = params;
         let path = self.root.join(&params.path);
 
         match notes::delete_note(&self.root, &path, params.permanent) {
-            Ok(msg) => Ok(CallToolResult::success(vec![Content::text(msg)])),
+            Ok(msg) => {
+                let _ = peer
+                    .notify_logging_message(LoggingMessageNotificationParam {
+                        level: LoggingLevel::Info,
+                        logger: Some("stumbling-rs".into()),
+                        data: msg.clone().into(),
+                    })
+                    .await;
+
+                Ok(CallToolResult::success(vec![Content::text(msg)]))
+            }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Failed to delete note: {}",
                 e
@@ -163,7 +187,10 @@ impl ServerHandler for StumblingServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_logging()
+                .build(),
             server_info: Implementation::from_build_env(),
             instructions: Some(
                 "MCP server for reading and searching markdown notes in a local vault.".to_string(),
