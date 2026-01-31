@@ -205,8 +205,18 @@ pub fn search_metadata(
 }
 
 /// Format content with YAML frontmatter.
+///
+/// Note: AI tools (e.g., Claude) sometimes serialize metadata as a JSON string
+/// `"{\"title\": ...}"` instead of passing a JSON object `{"title": ...}`.
+/// This function handles both cases by parsing string values as JSON.
 pub fn format_with_frontmatter(metadata: &serde_json::Value, body: &str) -> String {
-    let yaml = serde_yaml_ng::to_string(metadata).unwrap_or_default();
+    let meta = if let serde_json::Value::String(s) = metadata {
+        serde_json::from_str(s).unwrap_or_else(|_| metadata.clone())
+    } else {
+        metadata.clone()
+    };
+
+    let yaml = serde_yaml_ng::to_string(&meta).unwrap_or_default();
     // serde_yaml_ng adds a trailing newline, so we trim it
     let yaml = yaml.trim_end();
     format!("---\n{}\n---\n\n{}", yaml, body)
@@ -598,6 +608,19 @@ This is a test note about Gagagigo."#;
 
         assert!(result.starts_with("---\n"));
         assert!(result.contains("---\n\nJust body content"));
+    }
+
+    #[test]
+    fn test_format_with_frontmatter_string_metadata() {
+        // AI sometimes passes metadata as JSON string instead of object
+        let metadata = serde_json::json!(r#"{"title": "Test", "tags": ["a", "b"]}"#);
+        let body = "Body";
+
+        let result = format_with_frontmatter(&metadata, body);
+
+        // Should parse the string and convert to YAML properly
+        assert!(result.contains("title: Test"));
+        assert!(result.contains("tags:"));
     }
 
     #[test]
