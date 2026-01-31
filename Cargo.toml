@@ -2,6 +2,9 @@
 name = "stumbling-rs"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "MCP server for AI to read, write, and search local Markdown directories"
+repository = "https://github.com/Xantibody/stumbling-rs"
 
 [dependencies]
 rmcp = { version = "0.14", features = ["server", "transport-io"] }
