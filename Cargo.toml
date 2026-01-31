@@ -16,6 +16,7 @@ serde_yaml_ng = "0.10"
 markdown = "1.0.0-alpha"
 ignore = "0.4"
 grep = "0.4"
+regex = "1"
 anyhow = "1"
 schemars = "1"
 

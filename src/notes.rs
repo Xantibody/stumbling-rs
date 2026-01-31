@@ -16,6 +16,12 @@ pub struct SearchResult {
     pub line: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct MetadataSearchResult {
+    pub path: String,
+    pub value: serde_json::Value,
+}
+
 /// Read a note from the given path.
 /// If `parse_frontmatter` is true, separates YAML frontmatter from body.
 pub fn read_note(path: &Path, parse_frontmatter: bool) -> Result<String> {
@@ -85,6 +91,89 @@ pub fn search_notes(root: &Path, query: &str, limit: usize) -> Result<Vec<Search
                             line_number: line_num + 1,
                             line: line.to_string(),
                         });
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(results.into_inner().unwrap())
+}
+
+/// Get a nested field value from JSON using dot notation (e.g., "author.name").
+fn get_nested_field<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for part in field.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+/// Check if a JSON value matches a regex pattern.
+fn value_matches_pattern(value: &serde_json::Value, regex: &regex::Regex) -> bool {
+    match value {
+        serde_json::Value::String(s) => regex.is_match(s),
+        serde_json::Value::Number(n) => regex.is_match(&n.to_string()),
+        serde_json::Value::Bool(b) => regex.is_match(&b.to_string()),
+        serde_json::Value::Array(arr) => arr.iter().any(|v| value_matches_pattern(v, regex)),
+        _ => false,
+    }
+}
+
+/// Search notes by frontmatter metadata field.
+pub fn search_metadata(
+    root: &Path,
+    field: &str,
+    pattern: &str,
+    limit: usize,
+) -> Result<Vec<MetadataSearchResult>> {
+    let regex = regex::Regex::new(pattern)
+        .with_context(|| format!("Invalid regex pattern: {}", pattern))?;
+
+    let results: Mutex<Vec<MetadataSearchResult>> = Mutex::new(Vec::new());
+
+    // Collect all markdown files
+    let files: Vec<_> = WalkBuilder::new(root)
+        .hidden(true)
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !name.starts_with('.')
+        })
+        .build()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "md").unwrap_or(false))
+        .map(|e| e.into_path())
+        .collect();
+
+    // Search files in parallel
+    files.par_iter().for_each(|path| {
+        if let Ok(content) = fs::read_to_string(path) {
+            // Parse frontmatter
+            if let Some(rest) = content.strip_prefix("---") {
+                if let Some(end) = rest.find("\n---") {
+                    let frontmatter = rest[..end].trim();
+                    if let Ok(meta) = serde_yaml_ng::from_str::<serde_json::Value>(frontmatter) {
+                        // Get the field value
+                        if let Some(value) = get_nested_field(&meta, field) {
+                            if value_matches_pattern(value, &regex) {
+                                let relative_path = path
+                                    .strip_prefix(root)
+                                    .unwrap_or(path)
+                                    .to_string_lossy()
+                                    .to_string();
+
+                                let mut results = results.lock().unwrap();
+                                if results.len() < limit {
+                                    results.push(MetadataSearchResult {
+                                        path: relative_path,
+                                        value: value.clone(),
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -584,5 +673,84 @@ This is a test note about Gagagigo."#;
 
         assert_eq!(parsed["metadata"]["author"]["name"], "Gagagigo");
         assert_eq!(parsed["metadata"]["author"]["level"], 4);
+    }
+
+    // --- search_metadata ---
+
+    #[test]
+    fn test_search_metadata_by_title() {
+        let vault = setup_test_vault();
+        let results = search_metadata(vault.path(), "title", "Test", 10).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, "Test Note");
+    }
+
+    #[test]
+    fn test_search_metadata_by_tags() {
+        let vault = setup_test_vault();
+        let results = search_metadata(vault.path(), "tags", "rust", 10).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].value.is_array());
+    }
+
+    #[test]
+    fn test_search_metadata_no_match() {
+        let vault = setup_test_vault();
+        let results = search_metadata(vault.path(), "title", "NonExistent", 10).unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_metadata_nested_field() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("nested_meta.md");
+        let content = format_with_frontmatter(
+            &serde_json::json!({"author": {"name": "Gagagigo", "level": 8}}),
+            "Body",
+        );
+        write_note(&path, &content).unwrap();
+
+        let results = search_metadata(vault.path(), "author.name", "Gagagigo", 10).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, "Gagagigo");
+    }
+
+    #[test]
+    fn test_search_metadata_regex() {
+        let vault = setup_test_vault();
+        let results = search_metadata(vault.path(), "title", "^Test.*", 10).unwrap();
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_search_metadata_missing_field() {
+        let vault = setup_test_vault();
+        let results = search_metadata(vault.path(), "nonexistent_field", ".*", 10).unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_metadata_limit() {
+        let vault = setup_test_vault();
+
+        // Create multiple notes with same tag
+        for i in 0..5 {
+            let path = vault.path().join(format!("tagged_{}.md", i));
+            let content = format_with_frontmatter(
+                &serde_json::json!({"tags": ["common"]}),
+                &format!("Note {}", i),
+            );
+            write_note(&path, &content).unwrap();
+        }
+
+        let results = search_metadata(vault.path(), "tags", "common", 3).unwrap();
+
+        assert_eq!(results.len(), 3);
     }
 }

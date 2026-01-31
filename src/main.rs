@@ -57,6 +57,17 @@ pub struct DeleteNoteParams {
     permanent: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct SearchMetadataParams {
+    /// Field to search in frontmatter (e.g., "title", "tags", "author.name")
+    field: String,
+    /// Value pattern to match (supports regex)
+    pattern: String,
+    /// Maximum number of results to return (default: 20)
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
 #[tool_router]
 impl StumblingServer {
     pub fn new() -> Result<Self> {
@@ -115,6 +126,28 @@ impl StumblingServer {
             }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Search failed: {}",
+                e
+            ))])),
+        }
+    }
+
+    /// Search notes by frontmatter metadata field.
+    /// Supports nested fields with dot notation (e.g., "author.name").
+    #[tool(name = "search_metadata")]
+    async fn search_metadata(
+        &self,
+        params: Parameters<SearchMetadataParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Parameters(params) = params;
+
+        match notes::search_metadata(&self.root, &params.field, &params.pattern, params.limit) {
+            Ok(results) => {
+                let output =
+                    serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".to_string());
+                Ok(CallToolResult::success(vec![Content::text(output)]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                "Metadata search failed: {}",
                 e
             ))])),
         }
