@@ -1,6 +1,20 @@
 [package]
 name = "stumbling-rs"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+rmcp = { version = "0.14", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+markdown = "1.0.0-alpha"
+ignore = "0.4"
+grep = "0.4"
+anyhow = "1"
+schemars = "1"
+
+[dev-dependencies]
+tempfile = "3"
