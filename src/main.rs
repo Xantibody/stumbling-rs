@@ -43,7 +43,7 @@ pub struct WriteNoteParams {
     path: String,
     /// Body content to write to the note
     content: String,
-    /// Optional YAML frontmatter metadata (e.g., {"title": "My Note", "tags": ["rust"]})
+    /// Optional frontmatter metadata as JSON object. Example: {"title": "My Note", "tags": ["rust", "mcp"], "date": "2026-01-01"}. NG: Do NOT pass as string like "{\"title\": ...}"
     #[serde(default)]
     metadata: Option<serde_json::Value>,
 }
