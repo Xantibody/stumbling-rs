@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
+use markdown::{mdast::Node, Constructs, ParseOptions};
 use rayon::prelude::*;
 use serde::Serialize;
 use std::{
@@ -22,30 +23,54 @@ pub struct MetadataSearchResult {
     pub value: serde_json::Value,
 }
 
+/// Parse frontmatter from markdown content using markdown-rs AST.
+/// Returns (yaml_string, body) if frontmatter is present.
+fn parse_frontmatter(content: &str) -> Option<(String, String)> {
+    let options = ParseOptions {
+        constructs: Constructs {
+            frontmatter: true,
+            ..Constructs::default()
+        },
+        ..ParseOptions::default()
+    };
+
+    let ast = markdown::to_mdast(content, &options).ok()?;
+
+    if let Node::Root(root) = ast {
+        for child in &root.children {
+            if let Node::Yaml(yaml) = child {
+                // Get the end position of frontmatter to extract body
+                let body = if let Some(pos) = &yaml.position {
+                    let end_offset = pos.end.offset;
+                    content[end_offset..].trim_start().to_string()
+                } else {
+                    String::new()
+                };
+                return Some((yaml.value.clone(), body));
+            }
+        }
+    }
+    None
+}
+
 /// Read a note from the given path.
-/// If `parse_frontmatter` is true, separates YAML frontmatter from body.
-pub fn read_note(path: &Path, parse_frontmatter: bool) -> Result<String> {
+/// If `should_parse` is true, separates YAML frontmatter from body.
+pub fn read_note(path: &Path, should_parse: bool) -> Result<String> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
-    if !parse_frontmatter {
+    if !should_parse {
         return Ok(content);
     }
 
-    // Parse frontmatter if present
-    if let Some(rest) = content.strip_prefix("---") {
-        if let Some(end) = rest.find("\n---") {
-            let frontmatter = rest[..end].trim();
-            let body = rest[end + 4..].trim_start();
-
-            // Parse YAML frontmatter
-            if let Ok(meta) = serde_yaml_ng::from_str::<serde_json::Value>(frontmatter) {
-                let output = serde_json::json!({
-                    "metadata": meta,
-                    "body": body
-                });
-                return Ok(serde_json::to_string_pretty(&output)?);
-            }
+    // Parse frontmatter using markdown-rs AST
+    if let Some((yaml_str, body)) = parse_frontmatter(&content) {
+        if let Ok(meta) = serde_yaml_ng::from_str::<serde_json::Value>(&yaml_str) {
+            let output = serde_json::json!({
+                "metadata": meta,
+                "body": body
+            });
+            return Ok(serde_json::to_string_pretty(&output)?);
         }
     }
 
@@ -151,27 +176,23 @@ pub fn search_metadata(
     // Search files in parallel
     files.par_iter().for_each(|path| {
         if let Ok(content) = fs::read_to_string(path) {
-            // Parse frontmatter
-            if let Some(rest) = content.strip_prefix("---") {
-                if let Some(end) = rest.find("\n---") {
-                    let frontmatter = rest[..end].trim();
-                    if let Ok(meta) = serde_yaml_ng::from_str::<serde_json::Value>(frontmatter) {
-                        // Get the field value
-                        if let Some(value) = get_nested_field(&meta, field) {
-                            if value_matches_pattern(value, &regex) {
-                                let relative_path = path
-                                    .strip_prefix(root)
-                                    .unwrap_or(path)
-                                    .to_string_lossy()
-                                    .to_string();
+            // Parse frontmatter using markdown-rs AST
+            if let Some((yaml_str, _)) = parse_frontmatter(&content) {
+                if let Ok(meta) = serde_yaml_ng::from_str::<serde_json::Value>(&yaml_str) {
+                    if let Some(value) = get_nested_field(&meta, field) {
+                        if value_matches_pattern(value, &regex) {
+                            let relative_path = path
+                                .strip_prefix(root)
+                                .unwrap_or(path)
+                                .to_string_lossy()
+                                .to_string();
 
-                                let mut results = results.lock().unwrap();
-                                if results.len() < limit {
-                                    results.push(MetadataSearchResult {
-                                        path: relative_path,
-                                        value: value.clone(),
-                                    });
-                                }
+                            let mut results = results.lock().unwrap();
+                            if results.len() < limit {
+                                results.push(MetadataSearchResult {
+                                    path: relative_path,
+                                    value: value.clone(),
+                                });
                             }
                         }
                     }
