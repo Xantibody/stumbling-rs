@@ -8,11 +8,30 @@ Named after **Gagagigo** from Yu-Gi-Oh! — a creature who stumbles through hard
 
 ## Features
 
-- **Fast search**: Leverages Rust's parallel processing for instant retrieval from large note collections
-- **Markdown-native operations**: Search, create, update, and replace notes
-- **Frontmatter-aware**: Safely updates content while preserving YAML metadata
+- **Fast search**: Parallel regex search using Rayon
+- **Frontmatter-aware**: Parses YAML metadata separately from body
+- **Safe delete**: Moves to `.trash` by default (recoverable)
+- **Atomic writes**: Prevents data corruption
 
-## Configuration
+## Claude Desktop Setup
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "stumbling-rs": {
+      "command": "/path/to/stumbling-rs",
+      "env": {
+        "STUMBLING_ROOT": "/path/to/your/notes",
+        "STUMBLING_PARSE_FRONTMATTER": "true"
+      }
+    }
+  }
+}
+```
+
+## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
@@ -23,8 +42,15 @@ Named after **Gagagigo** from Yu-Gi-Oh! — a creature who stumbles through hard
 
 | Tool | Description |
 |------|-------------|
-| `list_files` | Browse directory structure |
-| `search_notes` | Full-text search with keywords or regex |
-| `read_note` | Read note content (with metadata separation) |
-| `write_note` | Create or overwrite notes |
-| `update_lines` | Precise line/section-level editing |
+| `read_note` | Read note content (with optional metadata separation) |
+| `search_notes` | Regex search across all `.md` files |
+| `write_note` | Create or overwrite notes (atomic write) |
+| `delete_note` | Move to `.trash` or permanently delete |
+
+## Build
+
+```bash
+cargo build --release
+```
+
+Binary will be at `target/release/stumbling-rs`.
