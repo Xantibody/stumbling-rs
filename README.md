@@ -44,7 +44,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 |------|-------------|
 | `read_note` | Read note content (with optional metadata separation) |
 | `search_notes` | Regex search across all `.md` files |
-| `write_note` | Create or overwrite notes (atomic write) |
+| `write_note` | Create or overwrite notes (supports `metadata` param for frontmatter) |
 | `delete_note` | Move to `.trash` or permanently delete |
 
 ## Build

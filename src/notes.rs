@@ -511,4 +511,78 @@ This is a test note about Gagagigo."#;
             .unwrap()
             .contains("Body content here"));
     }
+
+    #[test]
+    fn test_format_with_frontmatter_special_chars() {
+        let metadata = serde_json::json!({
+            "title": "Note: Important!",
+            "description": "Line1\nLine2",
+            "path": "foo/bar#baz"
+        });
+        let body = "Content";
+
+        let result = format_with_frontmatter(&metadata, body);
+
+        // Should be valid YAML that can be parsed back
+        assert!(result.contains("title:"));
+        assert!(result.contains("description:"));
+
+        // Verify roundtrip
+        let vault = TempDir::new().unwrap();
+        let path = vault.path().join("special.md");
+        write_note(&path, &result).unwrap();
+
+        let read_back = read_note(&path, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&read_back).unwrap();
+
+        assert_eq!(parsed["metadata"]["title"], "Note: Important!");
+        assert_eq!(parsed["metadata"]["description"], "Line1\nLine2");
+    }
+
+    #[test]
+    fn test_format_roundtrip_preserves_types() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("types.md");
+
+        let metadata = serde_json::json!({
+            "count": 42,
+            "ratio": 3.14,
+            "active": true,
+            "tags": ["a", "b"]
+        });
+        let content = format_with_frontmatter(&metadata, "Body");
+
+        write_note(&path, &content).unwrap();
+
+        let result = read_note(&path, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        // Verify types are preserved
+        assert_eq!(parsed["metadata"]["count"], 42);
+        assert_eq!(parsed["metadata"]["ratio"], 3.14);
+        assert_eq!(parsed["metadata"]["active"], true);
+        assert!(parsed["metadata"]["tags"].is_array());
+    }
+
+    #[test]
+    fn test_format_with_frontmatter_nested_objects() {
+        let vault = setup_test_vault();
+        let path = vault.path().join("nested.md");
+
+        let metadata = serde_json::json!({
+            "author": {
+                "name": "Gagagigo",
+                "level": 4
+            }
+        });
+        let content = format_with_frontmatter(&metadata, "Body");
+
+        write_note(&path, &content).unwrap();
+
+        let result = read_note(&path, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        assert_eq!(parsed["metadata"]["author"]["name"], "Gagagigo");
+        assert_eq!(parsed["metadata"]["author"]["level"], 4);
+    }
 }
